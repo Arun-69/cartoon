@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+edge-tts
+requests
+pillow
+numpy
+rembg[cpu]
+opencv-python-headless
+scipy
+gradio_client

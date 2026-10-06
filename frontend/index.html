@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kutti Padam Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+Thambi+2:wght@600;800&family=Nunito:wght@500;700&family=Noto+Sans+Tamil:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1e1b4b;--sun:#ffc21a;--coral:#ff5d73;--mint:#19b8a6;--sky:#e3f0ff;
+  --head:"Baloo Thambi 2","Noto Sans Tamil",system-ui,sans-serif;
+  --body:"Nunito","Noto Sans Tamil",system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--sky);color:var(--ink);font:500 16px/1.5 var(--body);padding:24px 16px 48px}
+.wrap{max-width:760px;margin:0 auto}
+header{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.logo{width:52px;height:52px;border:3px solid var(--ink);border-radius:14px;background:var(--sun);box-shadow:4px 4px 0 var(--ink);display:grid;place-items:center;font:800 24px var(--head)}
+h1{font:800 clamp(26px,5vw,38px)/1.1 var(--head);margin:0}
+.status{font-size:14px;margin:0 0 20px 66px;display:flex;align-items:center;gap:8px}
+.dot{width:10px;height:10px;border-radius:50%;background:#aaa;border:2px solid var(--ink)}
+.ok .dot{background:var(--mint)}.bad .dot{background:var(--coral)}
+
+form{background:#fff;border:3px solid var(--ink);border-radius:20px;box-shadow:6px 6px 0 var(--ink);padding:18px;display:grid;gap:12px}
+label{font:700 18px var(--head)}
+textarea{width:100%;font:inherit;font-size:17px;color:var(--ink);border:2.5px solid var(--ink);border-radius:12px;padding:12px;resize:vertical;min-height:96px}
+:focus-visible{outline:3px solid var(--coral);outline-offset:2px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:600 14px var(--body);background:var(--sky);color:var(--ink);border:2px solid var(--ink);border-radius:999px;padding:4px 12px;cursor:pointer}
+.chip:hover{background:var(--sun)}
+details{border:2.5px dashed var(--ink);border-radius:12px;padding:8px 12px}
+summary{cursor:pointer;font:700 16px var(--head)}
+.song{display:grid;gap:8px;margin-top:10px}
+.song input[type=file]{font:inherit}
+.song textarea{min-height:90px;font-size:15px}
+.btn{font:800 20px var(--head);color:var(--ink);background:var(--sun);border:3px solid var(--ink);border-radius:14px;padding:12px 18px;cursor:pointer;box-shadow:4px 4px 0 var(--ink);transition:transform .08s,box-shadow .08s}
+.btn:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--ink)}
+.btn:disabled{background:#d9d6ee;cursor:wait;transform:none;box-shadow:4px 4px 0 var(--ink)}
+.btn.alt{background:#fff;font-size:16px;padding:8px 14px;text-decoration:none;display:inline-block}
+
+.tv{position:relative;background:var(--coral);border:3px solid var(--ink);border-radius:28px;box-shadow:6px 6px 0 var(--ink);padding:16px;margin-top:44px}
+.tv::before,.tv::after{content:"";position:absolute;top:-34px;width:4px;height:40px;background:var(--ink);border-radius:4px}
+.tv::before{left:42%;transform:rotate(-24deg)}.tv::after{left:54%;transform:rotate(24deg)}
+.screen{background:var(--ink);border-radius:16px;aspect-ratio:16/9;display:grid;place-items:center;color:#fff;overflow:hidden}
+.screen>*{grid-area:1/1}
+.pane{display:none;text-align:center;padding:20px;width:100%}
+[data-state=idle] .p-idle,[data-state=busy] .p-busy,[data-state=error] .p-error{display:block}
+[data-state=done] .p-done{display:block;padding:0;height:100%}
+.pane h2{font:800 24px var(--head);margin:0 0 6px}
+.bar{height:18px;border:2.5px solid #fff;border-radius:99px;overflow:hidden;margin:16px auto 10px;max-width:380px}
+.bar i{display:block;height:100%;width:0;background:repeating-linear-gradient(45deg,var(--sun) 0 12px,#ffd95e 12px 24px);transition:width .6s}
+@media(prefers-reduced-motion:no-preference){.bar i{animation:slide 1s linear infinite;background-size:34px 34px}}
+@keyframes slide{to{background-position:34px 0}}
+video{width:100%;height:100%;display:block;background:#000}
+.error-t{color:#ffb3bd}
+.below{margin-top:18px;display:none;gap:14px}
+[data-state=done] .below{display:grid}
+.story{background:#fff;border:3px solid var(--ink);border-radius:16px;padding:14px 16px;box-shadow:4px 4px 0 var(--ink)}
+.story h3{font:800 20px var(--head);margin:0 0 6px}
+.story ol{margin:0;padding-left:22px}.story li{margin:4px 0}
+.actions{display:flex;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo" aria-hidden="true">படம்</div>
+    <h1>Kutti Padam Studio</h1>
+  </header>
+  <p class="status" id="status"><span class="dot"></span><span id="stxt">Backend check panren...</span></p>
+
+  <form id="f">
+    <label for="topic">Enna video venum?</label>
+    <textarea id="topic" name="topic" maxlength="300" placeholder="Oru kaakka and nari kadhai (image upload panna, kadhai hint mattum podhum)"></textarea>
+    <div class="chips" id="chips"></div>
+    <details>
+      <summary>Ungalitta image irukka? (optional)</summary>
+      <div class="song">
+        <label for="images">Image(s) upload pannunga (png/jpg, 6 varai)</label>
+        <input type="file" id="images" name="images" accept=".png,.jpg,.jpeg,.webp" multiple>
+        <small>Storyboard / comic grid (2x3 maari) upload pannina, panels-a automatic-a pirichi, order-padi
+        scenes-a maatthi, ovvoru scene-um animate aagum. Gemini key irundha narration-um varum.</small>
+      </div>
+    </details>
+    <details>
+      <summary>Ungalukku paatu irukka? (optional)</summary>
+      <div class="song">
+        <label for="song_file">Paatu file (mp3, 25MB varai, 3 nimidam varai edukkum)</label>
+        <input type="file" id="song_file" name="song_file" accept=".mp3,.wav,.m4a,.ogg,.aac,.flac">
+        <label for="lyrics">Lyrics (optional, irundha timing nalla varum)</label>
+        <textarea id="lyrics" name="lyrics" maxlength="4000" placeholder="Paatu varigal inga paste pannunga"></textarea>
+        <small>Paatu kuduthaa, antha paatu-ku match aagura scenes-oda, character aadura video varum.</small>
+      </div>
+    </details>
+    <button class="btn" id="go" type="submit">Video pannu</button>
+  </form>
+
+  <section aria-live="polite" id="stage" data-state="idle">
+    <div class="tv">
+      <div class="screen">
+        <div class="pane p-idle"><h2>Screen ready</h2><p>Topic type panni "Video pannu" amukkunga.</p></div>
+        <div class="pane p-busy"><h2 id="msg">Thodangudhu...</h2>
+          <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="pb"><i id="fill"></i></div>
+          <small>3-5 nimidam aagalaam. Page-a close pannaadheenga.</small></div>
+        <div class="pane p-error"><h2 class="error-t">Video varala</h2><p id="err"></p></div>
+        <div class="pane p-done"><video id="vid" controls playsinline></video></div>
+      </div>
+    </div>
+    <div class="below">
+      <div class="actions">
+        <a class="btn alt" id="dl" href="#">Download MP4</a>
+        <button class="btn alt" type="button" id="again">Innoru video</button>
+      </div>
+      <div class="story"><h3 id="title"></h3><ol id="lines"></ol></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// Backend address: same server-la irundha automatic. Vera idathula open pannina localhost:7860-ku connect aagum.
+// Override: index.html?api=http://localhost:8000
+const qs = new URLSearchParams(location.search).get("api");
+const API = (qs || (location.protocol.startsWith("http") && !location.port.match(/^(5500|5173|3000|8080)$/) ? "" : "http://localhost:7860")).replace(/\/$/, "");
+
+const $ = s => document.querySelector(s);
+const setState = s => { $("#stage").dataset.state = s; };
+let timer = null;
+
+["Oru kaakka and nari kadhai", "Nilavu paatu", "Anbaana yaanai", "ABC animals rhyme in English"].forEach(t => {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip"; b.textContent = t;
+  b.onclick = () => { $("#topic").value = t; $("#topic").focus(); };
+  $("#chips").append(b);
+});
+
+async function checkBackend() {
+  try {
+    const r = await fetch(API + "/api/health");
+    if (!r.ok) throw 0;
+    $("#status").className = "status ok"; $("#stxt").textContent = "Backend connected";
+  } catch (_) {
+    $("#status").className = "status bad";
+    $("#stxt").textContent = "Backend connect aagala (" + (API || location.origin) + "). uvicorn run aagudha paarunga.";
+  }
+}
+
+$("#f").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#go").disabled = true; setState("busy"); setProgress(0, "Thodangudhu...");
+  try {
+    const r = await fetch(API + "/api/jobs", { method: "POST", body: new FormData(e.target) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || "Server error (" + r.status + ")");
+    poll(j.id);
+  } catch (err) {
+    fail(err instanceof TypeError ? "Backend-ah connect panna mudiyala. Server run aagudha paarunga." : err.message);
+  }
+});
+
+function setProgress(p, msg) {
+  $("#fill").style.width = Math.round(p * 100) + "%";
+  $("#pb").setAttribute("aria-valuenow", Math.round(p * 100));
+  $("#msg").textContent = msg;
+}
+function fail(m) { clearInterval(timer); $("#err").textContent = m; setState("error"); $("#go").disabled = false; }
+
+function poll(id) {
+  clearInterval(timer);
+  timer = setInterval(async () => {
+    try {
+      const r = await fetch(API + "/api/jobs/" + id);
+      const j = await r.json();
+      if (!r.ok) return fail(j.detail || "Job kedaikala");
+      if (j.status === "error") return fail(j.error);
+      if (j.status === "done") {
+        clearInterval(timer);
+        $("#vid").src = API + j.video_url;
+        $("#dl").href = API + j.video_url + "?download=true";
+        $("#title").textContent = j.title;
+        $("#lines").replaceChildren(...j.scenes.map(t => Object.assign(document.createElement("li"), { textContent: t })));
+        setState("done"); $("#go").disabled = false;
+      } else setProgress(j.progress || 0, j.message);
+    } catch (_) { /* network blip - next tick retry */ }
+  }, 2000);
+}
+
+$("#again").onclick = () => { $("#vid").removeAttribute("src"); setState("idle"); $("#topic").focus(); };
+checkBackend();
+</script>
+</body>
+</html>
