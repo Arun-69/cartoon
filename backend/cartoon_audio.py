@@ -190,3 +190,30 @@ def make_jingle(path, dur, kind="intro"):
             _add(buf, 1.2 + j * 0.3, bell(hz(103 - (j % 2) * 3), 0.6), 0.09)
     buf /= max(1e-6, np.abs(buf).max()) / 0.85
     write_wav(path, buf)
+
+# ---------------------------------------------------------------- calm cinematic pad (realistic style-ku)
+def make_calm_pad(path, bpm=60):
+    """Slow warm chord pad + soft bell arpeggio. Seamless loop, copyright-safe."""
+    beat = 60.0 / bpm
+    bar = 4 * beat
+    chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]          # Am F C G
+    arp_notes = [[69, 72, 76, 72], [65, 69, 72, 69], [64, 67, 72, 67], [67, 71, 74, 71]]
+    total = len(chords) * 2 * bar
+    buf = np.zeros(int((total + bar) * SR))
+    for rep_i in range(2):
+        for ci, ch in enumerate(chords):
+            t0 = (rep_i * len(chords) + ci) * bar
+            t = _t(bar + 1.2)
+            env = np.minimum(1, t / 1.4) * np.exp(-np.maximum(0, t - bar) * 3.0)   # slow attack, soft release
+            pad = sum(np.sin(2 * np.pi * hz(m) * t) + 0.4 * np.sin(2 * np.pi * hz(m) * 1.003 * t) for m in ch)
+            pad = pad / len(ch) * env
+            _add(buf, t0, pad, 0.34)
+            _add(buf, t0, bass(hz(ch[0] - 12), bar), 0.22)
+            for k, n in enumerate(arp_notes[ci]):
+                _add(buf, t0 + k * beat, bell(hz(n), 1.6), 0.12)
+    n = int(total * SR)
+    tail = buf[n:]
+    buf = buf[:n]
+    buf[: len(tail)] += tail[: len(buf)]
+    buf /= max(1e-6, np.abs(buf).max()) / 0.8
+    write_wav(path, buf)

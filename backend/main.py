@@ -37,6 +37,8 @@ def cleanup():
         del JOBS[jid]
 
 
+# main.py — replace the run_job function and pool.submit call
+
 def run_job(jid, args):
     job = JOBS[jid]
     job["status"] = "running"
@@ -45,7 +47,30 @@ def run_job(jid, args):
         job["progress"], job["message"] = p, msg
 
     try:
-        res = pipeline.run_pipeline(**args, workdir=job["workdir"], on_progress=on_progress)
+        if args.get("song_file"):
+            # Song/hero pipeline lives in the other module
+            from . import song_pipeline          # <-- rename your second file to this
+            res = song_pipeline.run_song(
+                topic=args["topic"],
+                song_path=args["song_file"],
+                lyrics=args["lyrics"],
+                use_subs=args["use_subs"],
+                workdir=job["workdir"],
+                on_progress=on_progress,
+            )
+        else:
+            # Story/rhyme pipeline — note: no song_file / lyrics / image_files
+            res = pipeline.run_pipeline(
+                topic=args["topic"],
+                voice_label=args["voice_label"],
+                n_scenes=args["n_scenes"],
+                mode=args["mode"],
+                use_subs=args["use_subs"],
+                music_choice=args["music_choice"],
+                music_file=args["music_file"],
+                workdir=job["workdir"],
+                on_progress=on_progress,
+            )
         job.update(status="done", progress=1.0, message="Ready!", title=res["title"],
                    scenes=res["scenes"], video=res["video"])
     except Exception as e:
@@ -139,9 +164,17 @@ async def create_job(topic: str = Form(""), voice: Optional[str] = Form(None),
     JOBS[jid] = {"status": "queued", "progress": 0.0, "message": "Line-la irukku...",
                  "created": time.time(), "workdir": workdir}
     pool.submit(run_job, jid, dict(
-        topic=topic, voice_label=voice, n_scenes=max(3, min(8, scenes)), mode=mode,
-        use_subs=subtitles, music_choice=music, music_file=music_path,
-        song_file=song_path, lyrics=lyrics.strip()[:4000], image_files=image_paths))
+        topic=topic,
+        voice_label=voice,
+        n_scenes=max(3, min(8, scenes)),
+        mode=mode,
+        use_subs=subtitles,
+        music_choice=music,
+        music_file=music_path,
+        song_file=song_path,
+        lyrics=lyrics.strip()[:4000],
+        image_files=image_paths,
+    ))
     return {"id": jid}
 
 

@@ -18,7 +18,6 @@ import json
 import math
 import os
 import re
-import shutil
 import struct
 import subprocess
 import tempfile
@@ -31,7 +30,7 @@ import edge_tts
 import requests
 from PIL import Image, ImageDraw
 
-from . import hf_video, imagemode, song
+from . import hf_video
 
 # ---------------- Settings ----------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")          # free key: aistudio.google.com
@@ -52,12 +51,15 @@ ANIMATE = bool(FAL_KEY) and os.getenv("ANIMATE", "auto").lower() != "off"
 # FREE pseudo-3D engine (anim3d.py): rembg + opencv + scipy irundha automatic-a on
 ANIM3D = (os.getenv("ANIM3D", "auto").lower() != "off"
           and all(_ilu.find_spec(m) is not None for m in ("rembg", "numpy", "cv2", "scipy")))
-# Channel-style: ONE hero character (consistent) + scene-ku thaniya background. anim3d irundha automatic-a on.
-HERO_MODE = os.getenv("HERO_MODE", "auto").lower() != "off"
 SUB_FONT = os.getenv("SUB_FONT", "Noto Sans Tamil")
-SFX = os.getenv("SFX", "on").lower() != "off"         # boing / ting sound effects (3D clips)
-CARDS = os.getenv("CARDS", "on").lower() != "off"     # rainbow intro + "Bye Bye" outro
-VOICE_PITCH = os.getenv("VOICE_PITCH", "").strip()    # eg "+10Hz"; "+0Hz" = off  # Hindi-ku "Noto Sans Devanagari"
+# VISUAL_STYLE=realistic (default: Google Flow / Veo maari cinematic realistic) | cartoon (kids cartoon look)
+VISUAL_STYLE = os.getenv("VISUAL_STYLE", "realistic").lower()
+REALISTIC = VISUAL_STYLE != "cartoon"
+SFX = os.getenv("SFX", "off" if REALISTIC else "on").lower() != "off"      # boing/ting (cartoon-ku mattum default on)
+CARDS = os.getenv("CARDS", "off" if REALISTIC else "on").lower() != "off"  # rainbow intro + "Bye Bye" (cartoon default)
+VOICE_PITCH = os.getenv("VOICE_PITCH", "").strip()    # eg "+10Hz"; "+0Hz" = off
+MOTION_SUFFIX = (", natural realistic motion, cinematic camera, slow smooth push-in, high detail"
+                 if REALISTIC else ", playful smooth animation")
 
 # label -> (language, edge-tts voice)
 VOICES = {
@@ -69,13 +71,20 @@ VOICES = {
 }
 
 MODES = ["Story (kadhai)", "Rhyme (paatu)"]
-MUSIC_CHOICES = ["No music", "Cartoon fun tune (bouncy)", "Soft music-box tune"]
+MUSIC_CHOICES = ["No music", "Auto (matches style)", "Cartoon fun tune (bouncy)",
+                 "Calm cinematic pad", "Soft music-box tune"]
 
-STYLE = ("cute colorful kids cartoon, soft 3D cartoon render like popular nursery-rhyme videos, "
+STYLE_CARTOON = ("cute colorful kids cartoon, soft 3D cartoon render like popular nursery-rhyme videos, "
          "ONE round chubby adorable main character centered, full body visible from head to toe "
          "standing on the ground, facing the camera, huge shiny eyes, big happy smile, "
          "bright rainbow candy colors, simple cheerful background with clouds flowers and hills, "
          "soft lighting, smooth shading, child-friendly, no text, no watermark, ")
+
+STYLE_REAL = ("photorealistic cinematic 3D render, ultra detailed, natural soft lighting, shallow depth of field, "
+              "ONE main subject centered, full body visible standing on the ground, facing the camera, "
+              "realistic textures (fur, skin, fabric), natural vivid colors, simple uncluttered background, "
+              "35mm film look, high quality, no text, no watermark, ")
+STYLE = STYLE_REAL if REALISTIC else STYLE_CARTOON
 
 _usage = {"day": datetime.date.today(), "count": 0}
 
@@ -108,24 +117,15 @@ def _flash_candidates():
     return sorted(set(names), key=key, reverse=True)
 
 
-def gemini_generate(prompt, audio_path=None, image_paths=None):
-    parts_in = [{"text": prompt}]
-    for ip in image_paths or []:   # images-a Gemini paathu narration ezhudha
-        with open(ip, "rb") as f:
-            parts_in.insert(len(parts_in) - 1, {"inline_data": {"mime_type": "image/jpeg",
-                                                               "data": base64.b64encode(f.read()).decode()}})
-    if audio_path:   # paatu audio-va Gemini-kku anuppum (lyrics + timing kandupidikka)
-        with open(audio_path, "rb") as f:
-            parts_in.insert(0, {"inline_data": {"mime_type": "audio/mpeg",
-                                                "data": base64.b64encode(f.read()).decode()}})
-    body = {"contents": [{"parts": parts_in}],
+def gemini_generate(prompt):
+    body = {"contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"responseMimeType": "application/json"}}
     models = [_good_model["name"] or GEMINI_MODEL]
     tried = []
     for attempt in range(2):
         for m in models:
             r = requests.post(f"{_GEM}/models/{m}:generateContent",
-                              headers=_gem_headers(), json=body, timeout=180 if audio_path else 90)
+                              headers=_gem_headers(), json=body, timeout=90)
             if r.status_code == 200:
                 _good_model["name"] = m
                 parts = r.json()["candidates"][0]["content"]["parts"]
@@ -157,6 +157,11 @@ catchy feel (the last scene can repeat the first line)."""
         kind = f"""Write a short, positive kids story, age 3-8.
 Each scene "narration" = 1-2 simple sentences in {language}."""
 
+    char_rule = ("- ONE main character (animal or child) in every scene, full body, PHOTOREALISTIC cinematic look\n"
+                 "  (real fur/skin/fabric textures, natural lighting). Keep backgrounds simple and natural."
+                 if REALISTIC else
+                 "- ONE cute main character (animal or child) in every scene, full body, cartoon look,\n"
+                 "  happy faces, bright colors. Keep backgrounds simple and cheerful.")
     prompt = f"""{kind}
 Topic: {topic}
 Number of scenes: {n_scenes}
@@ -165,18 +170,13 @@ Rules:
 - Each scene "image_prompt": ENGLISH only, describe the scene visually.
   Repeat the same character descriptions (color, clothes, look) in EVERY image_prompt
   so characters look consistent.
-- "character": ENGLISH, ONE main cartoon character (animal or child) that appears in every scene;
-  one sentence (species, colors, clothes).
-- Each scene "background_prompt": ENGLISH, the SAME place as image_prompt but EMPTY:
-  no characters, no people, no animals.
 - Each scene "motion_prompt": ENGLISH, one short sentence about what moves
   (e.g. "the crow flaps its wings and hops, camera slowly pushes in").
-- ONE cute main character (animal or child) in every scene, full body, cartoon look,
-  happy faces, bright colors. Keep backgrounds simple and cheerful.
+{char_rule}
 - No violence or scary content.
 
 Return ONLY JSON in this format:
-{{"title": "...", "character": "...", "scenes": [{{"narration": "...", "image_prompt": "...", "background_prompt": "...", "motion_prompt": "..."}}]}}"""
+{{"title": "...", "scenes": [{{"narration": "...", "image_prompt": "...", "motion_prompt": "..."}}]}}"""
 
     text = None
     if GEMINI_API_KEY:
@@ -199,7 +199,7 @@ Return ONLY JSON in this format:
     scenes = story.get("scenes", [])[:n_scenes]
     if not scenes:
         raise ValueError("Scenes varala, marubadiyum try pannunga")
-    return story.get("title", "Kids Video"), scenes, story.get("character")
+    return story.get("title", "Kids Video"), scenes
 
 
 # ---------------- Step 2: Images ----------------
@@ -216,9 +216,9 @@ _img_lock = threading.Lock()
 _img_last = [0.0]
 
 
-def make_image(image_prompt, path, seed, style=None):
+def make_image(image_prompt, path, seed):
     """True = real image kedaichuduchu, False = placeholder (orange screen) potaachu."""
-    full = urllib.parse.quote((STYLE if style is None else style) + image_prompt)
+    full = urllib.parse.quote(STYLE + image_prompt)
     if IMG_KEY:
         url = (f"https://gen.pollinations.ai/image/{full}"
                f"?width=1024&height=576&seed={seed}&nologo=true&key={IMG_KEY}")
@@ -249,15 +249,6 @@ def make_image(image_prompt, path, seed, style=None):
 
 
 # ---------------- Step 3: Voice ----------------
-def speak(text, voice, path, rate, pitch=None, silent_dur=4.0):
-    """Text irundha voice; illa-na (image mode, Gemini key illa) silent audio."""
-    if not (text or "").strip():
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-                        "-t", str(silent_dur), "-c:a", "libmp3lame", path], check=True, capture_output=True)
-        return
-    make_voice(text, voice, path, rate, pitch)
-
-
 def make_voice(text, voice, path, rate, pitch=None):
     """pitch eg "+10Hz" -> konjam kutti/cheerful voice. Pitch work aagala-na pitch illama retry."""
     async def _run(p):
@@ -340,10 +331,19 @@ def animate_image(img, motion, out):
         f.write(v.content)
 
 
-def make_pingpong(video, out, workdir):
-    """Clip short-a irundha, forward+reverse pannina smooth-a loop aagum."""
-    fc = (f"[0:v]scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,fps={FPS},"
-          "split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0[v]")
+def prep_ai_clip(video, out, workdir, dur):
+    """AI clip (2-5 sec) -> narration length-ku neettum.
+    1) 1.8x varai slow-motion (frame blend)  2) innum kammi-na forward+reverse loop."""
+    vd = audio_duration(video)
+    slow = min(1.8, dur / vd) if dur > vd * 1.05 else 1.0
+    pre = f"scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,setsar=1"
+    if slow > 1.05:
+        pre += f",setpts={slow:.3f}*PTS,minterpolate=fps={FPS}:mi_mode=blend"
+    else:
+        pre += f",fps={FPS}"
+    fc = f"[0:v]{pre}[v]"
+    if vd * slow < dur - 0.05:      # innum short -> pingpong
+        fc = f"[0:v]{pre},split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1:a=0[v]"
     subprocess.run(["ffmpeg", "-y", "-i", video, "-filter_complex", fc, "-map", "[v]", "-an",
                     "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", out],
                    check=True, capture_output=True, cwd=workdir)
@@ -364,12 +364,12 @@ def camera_move(idx, frames):
     return f"{z}:{c}"
 
 
-def make_clip(img, audio, out, workdir, idx, sub_text=None, video=None, pad=0.5):
-    dur = audio_duration(audio) + pad
+def make_clip(img, audio, out, workdir, idx, sub_text=None, video=None):
+    dur = audio_duration(audio) + 0.5
     frames = int(dur * FPS)
     if video:
         pp = os.path.join(workdir, f"pp{idx}.mp4")
-        make_pingpong(video, pp, workdir)
+        prep_ai_clip(video, pp, workdir, dur)
         inputs = ["-stream_loop", "-1", "-i", pp, "-i", audio]
         base = "setsar=1"
     else:
@@ -449,7 +449,7 @@ def extract_layers3d(img_path):
     if not seg:
         return None
     im, fg, alpha = seg
-    return anim3d.build_layers(im, alpha, fill_background(im, alpha), W, H)
+    return anim3d.build_layers(im, alpha, fill_background(im, alpha), W, H, realistic=REALISTIC)
 
 
 def extract_cutout(img_path):
@@ -655,62 +655,33 @@ def check_quota():
 
 
 def run_pipeline(topic, voice_label, n_scenes, mode, use_subs, music_choice,
-                 music_file, workdir, on_progress, song_file=None, lyrics="", image_files=None):
+                 music_file, workdir, on_progress):
     """Returns {"title", "scenes", "video"}. on_progress(fraction, message)."""
-    if song_file:   # Song mode: user kudutha paatu thaan main audio
-        return song.run_song(topic, song_file, lyrics, use_subs, workdir, on_progress)
     language, voice = VOICES[voice_label]
     rate = "-12%" if mode.startswith("Rhyme") else "-5%"
     pitch = VOICE_PITCH or ("+10Hz" if mode.startswith("Rhyme") else "+4Hz")
     try:
         on_progress(0.05, "Kadhai ezhudhuren...")
-        image_files = list(image_files or [])
-        if image_files:   # IMAGE mode: ungal image(s) appadiye animate aagum
-            on_progress(0.04, "Images-a paakkuren (storyboard-na pirikkuren)...")
-            image_files = imagemode.prepare_images(image_files, workdir)
-            title, scenes = imagemode.narrate(image_files, topic, language, mode)
-            character = None
-        else:
-            title, scenes, character = make_story(topic, language, n_scenes, mode)
+        title, scenes = make_story(topic, language, n_scenes, mode)
 
-        hero = None   # ONE consistent main character, scene-ku scene background maarum
-        if HERO_MODE and ANIM3D and character:
-            on_progress(0.07, "Main character create panren...")
-            try:
-                hero = song.make_hero(character, workdir)
-            except Exception as e:
-                print(f"[hero] fail: {e}")
-
+        ai_scenes = hf_video.pick_scenes(len(scenes)) if hf_video.available() else set()
         clips = []
         for i, sc in enumerate(scenes):
             on_progress(0.1 + 0.75 * i / len(scenes), f"Scene {i + 1}/{len(scenes)} ready aaguthu...")
             img = os.path.join(workdir, f"img{i}.jpg")
             aud = os.path.join(workdir, f"aud{i}.mp3")
             clip = os.path.join(workdir, f"clip{i}.mp4")
-            if hero is not None and sc.get("background_prompt"):
-                try:
-                    make_image(sc["background_prompt"], img, seed=1000 + i, style=song.BG_STYLE)
-                    speak(sc["narration"], voice, aud, rate, pitch)
-                    layers = song.hero_layers(img, hero, i)
-                    make_3d_clip(layers, aud, clip, workdir, i, sc["narration"] if use_subs else None,
-                                 rhyme=mode.startswith("Rhyme"))
-                    clips.append(clip)
-                    continue
-                except Exception as e:  # fail aana per-scene image flow-ku povum
-                    print(f"[hero] scene {i + 1} fail: {e}")
-            if image_files:
-                shutil.copyfile(image_files[i], img)
-            elif not make_image(sc["image_prompt"], img, seed=1000 + i):
+            if not make_image(sc["image_prompt"], img, seed=1000 + i):
                 on_progress(0.1 + 0.75 * i / len(scenes),
                             f"WARNING Scene {i + 1}: image generate aagala (Pollinations) - placeholder use aaguthu")
-            speak(sc["narration"], voice, aud, rate, pitch)
+            make_voice(sc["narration"], voice, aud, rate, pitch)
             vid = None
-            if hf_video.available():
+            if i in ai_scenes and hf_video.available():
                 on_progress(0.1 + 0.75 * (i + 0.5) / len(scenes),
-                            f"Scene {i + 1}/{len(scenes)}: free AI animation (HF Space) - konjam neram aagum...")
+                            f"Scene {i + 1}/{len(scenes)}: real AI video (Flow-style) generate aaguthu - 1-3 nimidam aagalaam...")
                 try:
                     vid = os.path.join(workdir, f"vid{i}.mp4")
-                    hf_video.animate(img, sc.get("motion_prompt") or sc["image_prompt"], vid)
+                    hf_video.animate(img, (sc.get("motion_prompt") or sc["image_prompt"]) + MOTION_SUFFIX, vid)
                 except Exception as e:  # quota/error -> free 3D engine-ku povum
                     print(f"[hf-video] scene {i + 1} fail: {e}")
                     vid = None
@@ -764,11 +735,14 @@ def run_pipeline(topic, voice_label, n_scenes, mode, use_subs, music_choice,
         join_clips(clips, final, workdir)
 
         music = music_file or None
-        if not music and music_choice == MUSIC_CHOICES[1]:
+        choice = music_choice
+        if choice == MUSIC_CHOICES[1]:      # Auto -> style-ku match
+            choice = MUSIC_CHOICES[3] if REALISTIC else MUSIC_CHOICES[2]
+        if not music and choice in (MUSIC_CHOICES[2], MUSIC_CHOICES[3]):
             from . import cartoon_audio
             music = os.path.join(workdir, "tune.wav")
-            cartoon_audio.make_cartoon_tune(music)
-        elif not music and music_choice == MUSIC_CHOICES[2]:
+            (cartoon_audio.make_calm_pad if choice == MUSIC_CHOICES[3] else cartoon_audio.make_cartoon_tune)(music)
+        elif not music and choice == MUSIC_CHOICES[4]:
             music = os.path.join(workdir, "tune.wav")
             make_music_box(music)
         if music:

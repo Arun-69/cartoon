@@ -43,7 +43,7 @@ def _make_particles(W, H, seed):
     return parts
 
 
-def build_layers(im, alpha, bg, W, H, seed=0):
+def build_layers(im, alpha, bg, W, H, seed=0, realistic=False):
     """im: PIL RGB (WxH), alpha: PIL 'L' mask, bg: PIL RGB background (character removed)."""
     rgb = np.asarray(im.convert("RGB"), dtype=np.uint8)
     a8 = np.asarray(alpha.convert("L"), dtype=np.uint8)
@@ -84,7 +84,7 @@ def build_layers(im, alpha, bg, W, H, seed=0):
     X, Y = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
     return dict(W=W, H=H, bg=np.asarray(bg.convert("RGB"), dtype=np.uint8), pm=pm,
                 depth_c=depth_c, anchor=anchor, ch=ch, ground=ground, shadow=shadow,
-                X=X, Y=Y, parts=_make_particles(W, H, seed))
+                X=X, Y=Y, parts=_make_particles(W, H, seed), realistic=realistic)
 
 
 # ---------------------------------------------------------------- particles
@@ -130,6 +130,7 @@ def render_frames(L, env, frames, idx, fps, rhyme):
     ch, ground, shadow = L["ch"], L["ground"], L["shadow"]
     X, Y = L["X"], L["Y"]
     parts = L["parts"]
+    real = bool(L.get("realistic"))                    # realistic = hop/sparkles illa, subtle breathing + parallax
 
     env = np.convolve(np.asarray(env, np.float32), np.ones(5) / 5, mode="same")
     beat = beat_rate(rhyme)                            # hops per second (cartoon_audio-oda sync)
@@ -155,11 +156,21 @@ def render_frames(L, env, frames, idx, fps, rhyme):
         dx = 8.0 * math.sin(2 * math.pi * 0.3 * t + idx)
         jx = ch * 0.025 * amp * math.sin(2 * math.pi * 0.5 * beat * t + 0.8) * jelly_shape
         yaw = math.sin(2 * math.pi * 0.18 * t + idx * 1.3)          # camera orbit -1..1
+        if real:                                       # cinematic: subtle breathing + head-sway, no cartoon bounce
+            hop = 0.0
+            jump = 0.0
+            sy = 1.0 + 0.007 * math.sin(2 * math.pi * 0.33 * t + idx) + 0.004 * e
+            sx = 1.0 / math.sqrt(sy)
+            theta = math.radians(0.8) * math.sin(2 * math.pi * 0.22 * t + idx * 0.7)
+            dx = 4.0 * math.sin(2 * math.pi * 0.17 * t + idx)
+            jx = ch * 0.004 * (0.4 + e) * math.sin(2 * math.pi * 0.6 * t + 0.8) * jelly_shape
+            yaw = 1.0 * math.sin(2 * math.pi * 0.12 * t + idx * 1.3)    # slower camera orbit (smear kuraiva)
 
         # ---- background (ground-plane parallax)
         Xb = (X - yaw * K_BG * (ground - 0.5)).astype(np.float32)
         frame_bg = cv2.remap(bg, Xb, Y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        _draw_particles(frame_bg, parts, t, False, W, H)
+        if not real:
+            _draw_particles(frame_bg, parts, t, False, W, H)
 
         # ---- ground shadow (hop panna light-aagum)
         k = 0.40 * (1.0 - 0.55 * hop)
@@ -179,7 +190,8 @@ def render_frames(L, env, frames, idx, fps, rhyme):
         out = bgf * (1.0 - a) + chr_pm[..., :3].astype(np.float32)
         out = np.clip(out, 0, 255).astype(np.uint8)
 
-        _draw_particles(out, parts, t, True, W, H)
+        if not real:
+            _draw_particles(out, parts, t, True, W, H)
 
         # ---- slow camera push / pull
         kk = n / max(1, frames - 1)
